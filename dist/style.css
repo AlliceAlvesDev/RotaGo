@@ -6,3 +6,5 @@
 .brand{justify-content:center}.brandart{display:block;width:160px}.brandart img{display:block;width:100%;height:auto;object-fit:contain;border-radius:16px}
 @media(min-width:651px) and (max-width:1100px){.brandart{width:76px}}
 @media(max-width:650px){header{padding-left:70px;position:relative}aside .brand{display:flex;position:fixed;top:12px;left:18px;width:41px;height:41px;z-index:30}.brandart{width:41px}.brandart img{border-radius:9px}.breadcrumb{font-size:10px}.breadcrumb span{margin:0 6px}}
+
+.dayoff-picker{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}.dayoff-picker .field{flex:1;min-width:155px}.dayoff-picker button{min-height:41px}.dayoff-list{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.dayoff-chip{display:flex;align-items:center;gap:12px;border:1px solid var(--border);background:var(--soft);color:var(--blue);padding:9px 12px;border-radius:20px;font-size:12px}.dayoff-chip:hover{border-color:var(--blue)}.dayoff-chip span:last-child{font-size:17px;line-height:1}
