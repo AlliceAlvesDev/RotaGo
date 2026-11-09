@@ -1,0 +1,1 @@
+ALTER TABLE `work_sessions` ADD `expenses_json` text DEFAULT '[]' NOT NULL;

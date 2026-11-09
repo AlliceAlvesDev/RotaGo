@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import test, {after} from 'node:test';
+import {createServer} from 'vite';
+import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('..',import.meta.url));
+const vite=await createServer({appType:'custom',configFile:false,root,resolve:{alias:{'@':root}},server:{middlewareMode:true}});
+after(()=>vite.close());
+const {calculateBillProgress,calculatePlan}=await vite.ssrLoadModule('/components/rotas-dashboard.tsx');
+const plan={id:'p',month:'2026-11',startDate:'2026-11-09',availableCents:10000,dailyReserveCents:1000,kmPerLiter:10,fuelPriceCents:600,kmPerWorkday:100,enabled:true,items:[{id:'a',description:'Aluguel',amountCents:50000,reservedCents:5000,dueDate:'2026-11-12'},{id:'b',description:'Luz',amountCents:20000,reservedCents:0,dueDate:'2026-11-15'}],daysOff:['2026-11-10']};
+const route=(id,date,earnings=30000)=>({id,date,platform:'99',startTime:'08:00',endTime:'12:00',kmDriven:100,kmPerLiter:10,fuelPriceCents:600,fuelCents:6000,earningsCents:earnings,maintenanceCents:2000,investmentCents:1000,expenses:[{id:'e',description:'Alimentação',amountCents:2000}]});
+test('allocates net route money after fuel, reserves and expenses without changing manual amounts',()=>{const r=calculateBillProgress(plan,[route('one','2026-11-09')],'2026-11-09');assert.equal(r[0].coveredCents,33000);assert.equal(plan.items[0].reservedCents,5000);assert.equal(r[1].coveredCents,0)});
+test('deducts daily reserve once for multiple routes and recalculates edits and deletion',()=>{const rs=[route('one','2026-11-09'),route('two','2026-11-09')];assert.equal(calculateBillProgress(plan,rs,'2026-11-09')[0].coveredCents,50000);assert.equal(calculateBillProgress(plan,rs,'2026-11-09')[1].coveredCents,2000);rs[0].earningsCents=20000;assert.equal(calculateBillProgress(plan,rs,'2026-11-09')[0].coveredCents,42000);rs.pop();assert.equal(calculateBillProgress(plan,rs,'2026-11-09')[0].coveredCents,23000)});
+test('recalculates deadlines, excludes days off, ignores future and earlier unrelated routes',()=>{const empty=calculatePlan(plan,[],'2026-11-09');const funded=calculatePlan(plan,[route('one','2026-11-09')],'2026-11-09');assert.ok(funded.phases[0].netDailyCents<empty.phases[0].netDailyCents);assert.equal(empty.phases[0].workDays,3);assert.deepEqual(calculateBillProgress(plan,[route('before','2026-11-08'),route('future','2026-11-20')],'2026-11-09'),calculateBillProgress(plan,[],'2026-11-09'))});

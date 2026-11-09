@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import test, {after} from 'node:test';
+import React from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {createServer} from 'vite';
+import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('..',import.meta.url));
+const vite=await createServer({appType:'custom',configFile:false,root,resolve:{alias:{'@':root}},server:{middlewareMode:true}});
+after(()=>vite.close());
+test('renders RotaGo branding and the three reference tabs',async()=>{const {RotasDashboard}=await vite.ssrLoadModule('/components/rotas-dashboard.tsx');const html=renderToStaticMarkup(React.createElement(RotasDashboard,{firstName:null}));assert.match(html,/RotaGo/);assert.match(html,/Rota \/ Meta/);assert.match(html,/Planejamento/);assert.match(html,/Relatórios/);assert.doesNotMatch(html,/Rotas Yenme|codex-preview/);assert.match(html,/logo-symbol.png/)});

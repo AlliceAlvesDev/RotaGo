@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787704057513,
+      "tag": "0000_burly_ultimatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787706366177,
+      "tag": "0001_fair_shriek",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788309630046,
+      "tag": "0002_sour_madripoor",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792428920903,
+      "tag": "0003_jittery_angel",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794254150528,
+      "tag": "0004_workable_solo",
+      "breakpoints": true
+    }
+  ]
+}

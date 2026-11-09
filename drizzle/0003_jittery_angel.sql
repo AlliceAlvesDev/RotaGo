@@ -1,0 +1,1 @@
+ALTER TABLE `plan_items` ADD `reserved_cents` integer DEFAULT 0 NOT NULL;
