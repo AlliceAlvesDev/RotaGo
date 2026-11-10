@@ -36,3 +36,8 @@ A versão anterior do RotaGo continua acessível em `/versao-anterior/`, na mesm
 O site mantém acesso privado pelo Sites. Esta base não implementa assinaturas ou isolamento de registros entre clientes comerciais; esses recursos precisam ser desenvolvidos antes de disponibilizar a aplicação para vários clientes.
 
 Site: https://rotago-planejamento.yenmegeh.chatgpt.site
+
+
+## Aplicativo Android independente
+
+O código em [`android/`](android/) gera um APK offline, com dados salvos exclusivamente no celular de cada instalação, sem acesso ao banco deste site. Veja as instruções de instalação e compilação no [README Android](android/README.md).

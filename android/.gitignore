@@ -1,0 +1,11 @@
+.signing/
+.tools/
+release/
+native/build/
+native/assets/www/
+web/node_modules/
+web/dist/
+*.png
+!native/res/drawable/*.png
+!web/public/*.png
+*.log

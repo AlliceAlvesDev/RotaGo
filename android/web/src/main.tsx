@@ -1,0 +1,10 @@
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {RotasDashboard} from './components/rotas-dashboard';
+import {exportBackup,restoreBackup} from './offline-store';
+import './styles.css';
+if(!crypto.randomUUID)Object.defineProperty(crypto,'randomUUID',{value:()=>('10000000-1000-4000-8000-100000000000').replace(/[018]/g,c=>(Number(c)^crypto.getRandomValues(new Uint8Array(1))[0]&15>>Number(c)/4).toString(16))});
+window.addEventListener('rotago-export',()=>{try{const content=exportBackup(),filename='RotaGo-backup-'+new Date().toISOString().slice(0,10)+'.json',native=(window as any).RotaGoNative;if(native?.saveBackup){native.saveBackup(content,filename)}else{const url=URL.createObjectURL(new Blob([content],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}}catch{alert('Não foi possível exportar o backup.')}});
+const file=document.createElement('input');file.type='file';file.accept='application/json,.json';file.style.display='none';document.body.append(file);window.addEventListener('rotago-import',()=>file.click());file.addEventListener('change',async()=>{try{const selected=file.files?.[0];if(!selected)return;if(selected.size>20*1024*1024)throw Error('O backup é muito grande.');if(!confirm('Restaurar este backup e substituir todos os dados locais deste aplicativo?'))return;restoreBackup(await selected.text());location.reload()}catch(e){alert(e instanceof Error?e.message:'Backup inválido.')}finally{file.value=''}});
+class AppBoundary extends React.Component<{children:React.ReactNode},{failed:boolean}>{state={failed:false};static getDerivedStateFromError(){return {failed:true}}render(){return this.state.failed?<div style={{padding:30,color:'#edf4ff',background:'#071426',minHeight:'100vh'}}><h1>RotaGo</h1><p>Não foi possível abrir o aplicativo. Atualize o Android System WebView pela Play Store e tente novamente.</p><button onClick={()=>location.reload()}>Tentar novamente</button></div>:this.props.children}}
+createRoot(document.getElementById('root')!).render(<AppBoundary><RotasDashboard firstName={null}/></AppBoundary>);
