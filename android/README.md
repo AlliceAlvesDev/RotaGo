@@ -4,7 +4,7 @@ APK Android independente do site RotaGo e do Rotas Yenme. Usa os mesmos formulá
 
 ## Instalar
 
-Baixe `RotaGo-1.0.0.apk` na seção Releases, abra o arquivo no Android e autorize a instalação por esse navegador/gerenciador quando o Android solicitar. Compatível com Android 8.0 ou superior e Android System WebView atualizado. Não é um aplicativo para iPhone.
+Baixe `RotaGo-1.1.0.apk` na seção Releases, abra o arquivo no Android e autorize a instalação por esse navegador/gerenciador quando o Android solicitar. Compatível com Android 8.0 ou superior e Android System WebView atualizado. Não é um aplicativo para iPhone.
 
 ## Dados
 
@@ -34,3 +34,15 @@ A primeira execução gera a identidade de assinatura em `.signing/`. **Guarde e
 - Compilação Android, alinhamento e assinatura APK v2/v3 verificados.
 
 Esta primeira versão ainda precisa ser testada em aparelho Android físico, especialmente os seletores nativos de arquivo e o comportamento ao instalar atualizações.
+
+
+## Novidades da versão 1.1.0
+
+- Escolha por rota: todo líquido para contas ou apenas o valor previsto, com sobra no cofrinho.
+- O limite para contas e a reserva diária são compartilhados pelas rotas do mesmo dia.
+- Aba Valores em conta: contas, reservas e cofrinho, com ajustes e histórico de retiradas.
+- Cada conta cadastrada é descontada do saldo de controle no vencimento, uma única vez no cálculo; ao reabrir o app, vencimentos já passados também entram. Isso não faz pagamentos no banco.
+- Avisos de contas que vencem hoje, dentro do aplicativo.
+- Reservas incluem manutenção, investimento e reserva diária. Combustível e gastos extras são custos, não saldos.
+- Registros antigos mantêm a opção de todo o líquido para contas. Backups da versão 1 continuam compatíveis; novos backups usam o formato 2.
+- A atualização mantém pacote, chave de assinatura e chave de armazenamento. Instale por cima da versão anterior; não desinstale. Exporte um backup antes de atualizar.

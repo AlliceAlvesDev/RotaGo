@@ -1,5 +1,6 @@
 "use client";
 import { offlineRequest as fetch } from "../offline-store";
+import { allocateRoutes, accountBalances, type AccountAdjustment, type AccountName } from "../accounts";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -36,7 +37,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster } from "@/components/ui/sonner";
 
-type RotasResponse = { error?: string; sessions?: Record<string, unknown>[]; goals?: Record<string, unknown>[]; plans?: Record<string, unknown>[]; planItems?: Record<string, unknown>[]; planDaysOff?: Record<string, unknown>[]; settings?: { automatic_reserves?: boolean; maintenance_percent?: number; investment_percent?: number } };
+type RotasResponse = { adjustments?: AccountAdjustment[]; error?: string; sessions?: Record<string, unknown>[]; goals?: Record<string, unknown>[]; plans?: Record<string, unknown>[]; planItems?: Record<string, unknown>[]; planDaysOff?: Record<string, unknown>[]; settings?: { automatic_reserves?: boolean; maintenance_percent?: number; investment_percent?: number } };
 type Platform = "shopee" | "99" | "uber";
 type RouteExpense = { id: string; description: string; amountCents: number };
 
@@ -55,6 +56,9 @@ type WorkSession = {
   investmentCents: number;
   expenses: RouteExpense[];
   kmStart: number;
+  allocationMode?: "all" | "target";
+  billsTargetCents?: number;
+  dailyReserveTargetCents?: number;
 };
 
 type DailyGoal = {
@@ -127,6 +131,7 @@ type SessionForm = {
   maintenance: string;
   investment: string;
   expenses: Array<{ id: string; description: string; amount: string }>;
+  allocationMode: "all" | "target";
   kmMode: "trip" | "odometer";
   kmStart: string;
   kmEnd: string;
@@ -185,7 +190,7 @@ function emptySession(date: string): SessionForm {
     earnings: "",
     maintenance: "",
     investment: "",
-    expenses: [], kmMode: "trip", kmStart: "", kmEnd: "",
+    allocationMode:"all", expenses: [], kmMode: "trip", kmStart: "", kmEnd: "",
   };
 }
 
@@ -224,18 +229,7 @@ function countWorkDays(start: string, end: string, daysOff: Set<string>) {
 }
 
 export function calculateBillProgress(plan: MonthlyPlan, sessions: WorkSession[] = [], asOfDate = plan.startDate) {
-  const earningsByDay = new Map<string, number>();
-  for (const session of sessions) {
-    if (session.date < plan.startDate || session.date > asOfDate) continue;
-    earningsByDay.set(
-      session.date,
-      (earningsByDay.get(session.date) || 0) + session.earningsCents - session.fuelCents - session.maintenanceCents - session.investmentCents - expenseTotal(session),
-    );
-  }
-  const earnedForBills = [...earningsByDay.values()].reduce(
-    (total, dailyNet) => total + (dailyNet < 0 ? dailyNet : Math.max(0, dailyNet - plan.dailyReserveCents)),
-    0,
-  );
+  const earnedForBills = allocateRoutes(sessions.filter(s=>s.date>=plan.startDate), [plan], asOfDate).reduce((sum,r)=>sum+r.bills,0);
   let available = Math.max(0, plan.availableCents + earnedForBills);
   return [...plan.items]
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
@@ -329,6 +323,9 @@ function normalizeSession(row: Record<string, unknown>): WorkSession {
     investmentCents: Number(row.investment_cents),
     expenses: JSON.parse(String(row.expenses_json || "[]")),
     kmStart: Number(row.km_start || 0),
+    allocationMode: row.allocation_mode === "target" ? "target" : "all",
+    billsTargetCents:row.bills_target_cents===undefined?undefined:Number(row.bills_target_cents),
+    dailyReserveTargetCents:row.daily_reserve_target_cents===undefined?undefined:Number(row.daily_reserve_target_cents),
   };
 }
 
@@ -386,6 +383,12 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
   const [theme, setTheme] = useState("dark");
   useEffect(() => { const saved = localStorage.getItem("rotago-theme") || "dark"; setTheme(saved); document.documentElement.classList.toggle("light", saved === "light"); document.documentElement.classList.toggle("dark", saved !== "light"); }, []);
   function toggleTheme() { const next = theme === "dark" ? "light" : "dark"; setTheme(next); localStorage.setItem("rotago-theme", next); document.documentElement.classList.toggle("light", next === "light"); document.documentElement.classList.toggle("dark", next !== "light"); }
+  const [adjustments,setAdjustments]=useState<AccountAdjustment[]>([]);
+  const [balanceDate,setBalanceDate]=useState(localDateKey());
+  const [balanceEdit,setBalanceEdit]=useState<AccountName|null>(null);
+  const [balanceValue,setBalanceValue]=useState("");
+  const [balanceReason,setBalanceReason]=useState("");
+  useEffect(()=>{const refresh=()=>setBalanceDate(localDateKey());const timer=setInterval(refresh,60000);window.addEventListener("focus",refresh);document.addEventListener("visibilitychange",refresh);return()=>{clearInterval(timer);window.removeEventListener("focus",refresh);document.removeEventListener("visibilitychange",refresh)}},[]);
   const [sessions, setSessions] = useState<WorkSession[]>([]);
   const [goals, setGoals] = useState<DailyGoal[]>([]);
   const [plans, setPlans] = useState<MonthlyPlan[]>([]);
@@ -412,6 +415,7 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
       const response = await fetch("/api/rotas", { cache: "no-store" });
       const data = await response.json() as RotasResponse;
       if (!response.ok) throw new Error(data.error || "Não foi possível carregar.");
+      setAdjustments(data.adjustments||[]);
       setSessions((data.sessions || []).map(normalizeSession));
       setGoals((data.goals || []).map((row: Record<string, unknown>) => ({
         date: String(row.work_date),
@@ -559,6 +563,7 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
       earnings: String(item.earningsCents / 100),
       maintenance: item.maintenanceCents ? String(item.maintenanceCents / 100) : "",
       investment: item.investmentCents ? String(item.investmentCents / 100) : "",
+      allocationMode:item.allocationMode||"all",
       expenses: (item.expenses || []).map(e => ({ id:e.id, description:e.description, amount:String(e.amountCents / 100) })),
       kmMode: item.kmStart ? "odometer" : "trip", kmStart:String(item.kmStart || ""), kmEnd:String(item.kmStart + item.kmDriven),
     });
@@ -622,9 +627,11 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
       const investment = settings.automaticReserves
         ? (earnings * settings.investmentPercent) / 100
         : Number(sessionForm.investment || 0);
+      const allocation=routeAllocationContext(sessionForm.date,sessionForm.id);
+      if(sessionForm.allocationMode==='target'&&!allocation.plan)throw new Error('Crie ou ative um planejamento para separar somente o valor previsto.');
       await postData({
         type: "session",
-        session: { ...sessionForm, maintenance, investment, expenses: sessionForm.expenses.map(e => ({ id:e.id, description:e.description, amount:Number(e.amount) })) },
+        session: { ...sessionForm, maintenance, investment, billsTargetCents:allocation.target, dailyReserveTargetCents:allocation.plan?.dailyReserveCents||0, expenses: sessionForm.expenses.map(e => ({ id:e.id, description:e.description, amount:Number(e.amount) })) },
       });
       setSelectedDate(sessionForm.date);
       setSessionOpen(false);
@@ -735,6 +742,17 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
     if (choice.outcome === "accepted") setInstallPrompt(null);
   }
 
+  const ledger=useMemo(()=>accountBalances(plans,sessions,adjustments,balanceDate),[plans,sessions,adjustments,balanceDate]);
+  const todayDue=ledger.due.filter(i=>i.dueDate===balanceDate);
+  const accountLabels:Record<AccountName,string>={bills:"Para as contas",reserve:"Reservas",piggy:"Cofrinho"};
+  function routeAllocationContext(date:string,editingId:string){
+    const plan=plans.find(p=>p.enabled&&p.month===date.slice(0,7)&&date>=p.startDate);
+    const original=sessions.find(r=>r.id===editingId&&r.date===date);
+    const before=sessions.filter(r=>r.id!==editingId&&r.date<date);
+    const phase=plan?calculatePlan(plan,before,date).phases.find(p=>date>=p.startDate&&date<=p.endDate):undefined;
+    return {plan,target:original?.billsTargetCents??(plan?.daysOff.includes(date)?0:phase?.netDailyCents||0)};
+  }
+  async function saveBalance(event:FormEvent){event.preventDefault();if(!balanceEdit)return;setSaving(true);try{const desired=Math.round(Number(balanceValue)*100);if(!Number.isSafeInteger(desired)||desired<0)throw new Error("Informe um saldo válido.");await postData({type:"adjustment",date:balanceDate,account:balanceEdit,amountCents:desired-ledger.balances[balanceEdit],description:balanceReason.trim()||"Ajuste manual de saldo"});await loadData();setBalanceEdit(null);toast.success("Saldo ajustado. As próximas rotas continuarão somando normalmente.")}catch(e){toast.error(e instanceof Error?e.message:"Não foi possível ajustar.")}finally{setSaving(false)}}
   const autoMaintenance = (Number(sessionForm.earnings || 0) * settings.maintenancePercent) / 100;
   const autoInvestment = (Number(sessionForm.earnings || 0) * settings.investmentPercent) / 100;
   const calculatedFuel =
@@ -746,6 +764,10 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
       ? Math.ceil((Number(planForm.kmPerWorkday) / Number(planForm.kmPerLiter)) * Number(planForm.fuelPrice))
       : 0;
 
+  const draftContext=routeAllocationContext(sessionForm.date,sessionForm.id);
+  const draftId=sessionForm.id||"~new-route";
+  const draft:WorkSession={id:draftId,date:sessionForm.date,platform:sessionForm.platform,startTime:sessionForm.startTime,endTime:sessionForm.endTime,kmDriven:Number(sessionForm.kmDriven||0),kmPerLiter:Number(sessionForm.kmPerLiter||0),kmStart:Number(sessionForm.kmStart||0),fuelPriceCents:Math.round(Number(sessionForm.fuelPrice||0)*100),earningsCents:Math.round(Number(sessionForm.earnings||0)*100),fuelCents:calculatedFuel*100,maintenanceCents:Math.round((settings.automaticReserves?autoMaintenance:Number(sessionForm.maintenance||0))*100),investmentCents:Math.round((settings.automaticReserves?autoInvestment:Number(sessionForm.investment||0))*100),expenses:sessionForm.expenses.map(e=>({id:e.id,description:e.description,amountCents:Math.round(Number(e.amount||0)*100)})),allocationMode:sessionForm.allocationMode,billsTargetCents:draftContext.target,dailyReserveTargetCents:draftContext.plan?.dailyReserveCents||0};
+  const draftAllocation=allocateRoutes([...sessions.filter(r=>r.id!==sessionForm.id),draft],plans,sessionForm.date).find(r=>r.id===draftId)!;
   return (
     <main className="app-shell">
       <div className="ambient ambient-one" />
@@ -781,11 +803,12 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
           </label>
         </div>
 
+        {todayDue.length>0&&<section className="due-today" role="status" aria-live="polite">{todayDue.map(i=><p key={i.id}><CalendarClock size={17}/><strong>{i.description} vence hoje</strong><span>{currency.format(i.amountCents/100)}</span></p>)}<small>O valor foi descontado do saldo de controle das contas. Confira o pagamento no seu banco.</small></section>}
         <Tabs defaultValue="today" className="main-tabs">
           <TabsList className="main-tabs-list">
             <TabsTrigger value="today">Rota / Meta</TabsTrigger>
             <TabsTrigger value="planner">Planejamento</TabsTrigger>
-            <TabsTrigger value="reports">Relatórios</TabsTrigger>
+            <TabsTrigger value="reports">Relatórios</TabsTrigger><TabsTrigger value="balances">Valores em conta</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today" className="tab-panel">
@@ -850,6 +873,7 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
                     <div className="session-list">
                       {daySessions.map((item, index) => {
                         const km = item.kmDriven;
+                        const allocation=allocateRoutes(sessions,plans,item.date).find(r=>r.id===item.id);
                         const itemCosts = item.fuelCents + item.maintenanceCents + item.investmentCents + expenseTotal(item);
                         return (
                           <article className="session-card" key={item.id}>
@@ -861,7 +885,7 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
                               <div><strong>{item.platform === "shopee" ? "Shopee" : item.platform === "uber" ? "Uber" : "99 Corridas"}</strong><span><Clock3 size={14} /> {item.startTime} — {item.endTime} · {formatHours(minutesBetween(item.startTime, item.endTime))}</span></div>
                               <div className="session-stats"><span>{km.toFixed(1)} km</span><span>{item.kmPerLiter ? `${item.kmPerLiter.toFixed(1)} km/L` : "— km/L"}</span><span>combustível {currency.format(item.fuelCents / 100)}</span>{item.expenses.map(e => <span key={e.id}>{e.description}: {currency.format(e.amountCents / 100)}</span>)}</div>
                             </div>
-                            <div className="session-value"><span>ganho</span><strong>{currency.format(item.earningsCents / 100)}</strong><small>líquido {currency.format((item.earningsCents - itemCosts) / 100)}</small></div>
+                            <div className="session-value"><span>ganho</span><strong>{currency.format(item.earningsCents / 100)}</strong><small>líquido {currency.format((item.earningsCents - itemCosts) / 100)}</small><small>contas {currency.format((allocation?.bills||0)/100)} · cofrinho {currency.format((allocation?.piggy||0)/100)}</small></div>
                             <div className="session-actions">
                               <Button size="icon" variant="ghost" onClick={() => openEditSession(item)} aria-label="Editar jornada"><Pencil size={16} /></Button>
                               <Button size="icon" variant="ghost" onClick={() => setDeleteId(item.id)} aria-label="Excluir jornada"><Trash2 size={16} /></Button>
@@ -979,7 +1003,8 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
               <div><span>Desempenho</span><h2>Relatórios financeiros</h2><p>Entenda onde sua rota rende mais.</p></div>
               <Tabs value={reportPeriod} onValueChange={setReportPeriod}>
                 <TabsList className="period-tabs"><TabsTrigger value="day">Diário</TabsTrigger><TabsTrigger value="week">Semanal</TabsTrigger><TabsTrigger value="month">Mensal</TabsTrigger></TabsList>
-              </Tabs><footer className="rotago-footer"><span>RotaGo · Dados privados neste celular · Sem sincronização</span><button type="button" onClick={() => window.dispatchEvent(new Event("rotago-export"))}>Exportar backup</button><button type="button" onClick={() => window.dispatchEvent(new Event("rotago-import"))}>Restaurar backup</button></footer>
+                <TabsContent value="balances" className="tab-panel"><section className="report-header"><div><span>Seu dinheiro separado</span><h2>Valores em conta</h2><p>Saldos de controle até {formatDate(balanceDate)}. Atualizados automaticamente pelas rotas.</p></div></section><div className="account-cards">{(['bills','reserve','piggy'] as AccountName[]).map(account=><article className="account-card" key={account}><span>{accountLabels[account]}</span><h3 className={ledger.balances[account]<0?'negative':''}>{currency.format(ledger.balances[account]/100)}</h3><p>{account==='bills'?'Entradas para contas, menos vencimentos e ajustes.':account==='reserve'?'Manutenção, investimento e reserva diária, menos retiradas.':'Somente a sobra das rotas na opção de valor previsto.'}</p><Button variant="outline" onClick={()=>{setBalanceEdit(account);setBalanceValue(String(Math.max(0,ledger.balances[account])/100));setBalanceReason('')}}><Pencil size={15}/> Ajustar saldo / registrar retirada</Button></article>)}</div><p className="account-help">Esses valores são controles do aplicativo, sem conexão ao banco. No vencimento, cada conta cadastrada é descontada uma vez do saldo das contas. Se o app estiver fechado, a atualização aparece ao reabrir. Os ajustes não alteram os ganhos registrados nas rotas.</p>{ledger.balances.bills<0&&<p className="planner-warning">O saldo das contas está negativo após vencimentos e ajustes. Confira os valores disponíveis no banco.</p>}<section className="planner-card"><h3>Vencimentos descontados</h3>{ledger.due.length?ledger.due.slice().sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(i=><div className="account-history" key={i.id}><div><strong>{i.description}</strong><small>{formatDate(i.dueDate)}</small></div><b>− {currency.format(i.amountCents/100)}</b></div>):<p className="account-help">Nenhum vencimento descontado até hoje.</p>}</section><section className="planner-card"><h3>Ajustes e retiradas</h3>{adjustments.length?adjustments.slice().reverse().map(a=><div className="account-history" key={a.id}><div><strong>{a.description}</strong><small>{accountLabels[a.account]} · {formatDate(a.date)}</small></div><b>{a.amountCents>=0?'+ ':''}{currency.format(a.amountCents/100)}</b></div>):<p className="account-help">Nenhum ajuste manual. Para registrar uma retirada, informe o saldo atual após a retirada.</p>}</section></TabsContent>
+        </Tabs><footer className="rotago-footer"><span>RotaGo · Dados privados neste celular · Sem sincronização</span><button type="button" onClick={() => window.dispatchEvent(new Event("rotago-export"))}>Exportar backup</button><button type="button" onClick={() => window.dispatchEvent(new Event("rotago-import"))}>Restaurar backup</button></footer>
             </section>
 
             <section className="report-metrics">
@@ -1014,6 +1039,7 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
               </article>
             </section>
           </TabsContent>
+          <TabsContent value="balances" className="tab-panel"><section className="report-header"><div><span>Seu dinheiro separado</span><h2>Valores em conta</h2><p>Saldos de controle até {formatDate(balanceDate)}. Atualizados automaticamente pelas rotas.</p></div></section><div className="account-cards">{(['bills','reserve','piggy'] as AccountName[]).map(account=><article className="account-card" key={account}><span>{accountLabels[account]}</span><h3 className={ledger.balances[account]<0?'negative':''}>{currency.format(ledger.balances[account]/100)}</h3><p>{account==='bills'?'Entradas para contas, menos vencimentos e ajustes.':account==='reserve'?'Manutenção, investimento e reserva diária, menos retiradas.':'Somente a sobra das rotas na opção de valor previsto.'}</p><Button variant="outline" onClick={()=>{setBalanceEdit(account);setBalanceValue(String(Math.max(0,ledger.balances[account])/100));setBalanceReason('')}}><Pencil size={15}/> Ajustar saldo / registrar retirada</Button></article>)}</div><p className="account-help">Esses valores são controles do aplicativo, sem conexão ao banco. No vencimento, cada conta cadastrada é descontada uma vez do saldo das contas. Se o app estiver fechado, a atualização aparece ao reabrir. Os ajustes não alteram os ganhos registrados nas rotas.</p>{ledger.balances.bills<0&&<p className="planner-warning">O saldo das contas está negativo após vencimentos e ajustes. Confira os valores disponíveis no banco.</p>}<section className="planner-card"><h3>Vencimentos descontados</h3>{ledger.due.length?ledger.due.slice().sort((a,b)=>b.dueDate.localeCompare(a.dueDate)).map(i=><div className="account-history" key={i.id}><div><strong>{i.description}</strong><small>{formatDate(i.dueDate)}</small></div><b>− {currency.format(i.amountCents/100)}</b></div>):<p className="account-help">Nenhum vencimento descontado até hoje.</p>}</section><section className="planner-card"><h3>Ajustes e retiradas</h3>{adjustments.length?adjustments.slice().reverse().map(a=><div className="account-history" key={a.id}><div><strong>{a.description}</strong><small>{accountLabels[a.account]} · {formatDate(a.date)}</small></div><b>{a.amountCents>=0?'+ ':''}{currency.format(a.amountCents/100)}</b></div>):<p className="account-help">Nenhum ajuste manual. Para registrar uma retirada, informe o saldo atual após a retirada.</p>}</section></TabsContent>
         </Tabs><footer className="rotago-footer"><span>RotaGo · Dados privados neste celular · Sem sincronização</span><button type="button" onClick={() => window.dispatchEvent(new Event("rotago-export"))}>Exportar backup</button><button type="button" onClick={() => window.dispatchEvent(new Event("rotago-import"))}>Restaurar backup</button></footer>
       </div>
 
@@ -1038,7 +1064,8 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
               <MoneyInput label={`Reserva investimento${settings.automaticReserves ? ` (${settings.investmentPercent}%)` : ""}`} value={settings.automaticReserves ? autoInvestment.toFixed(2) : sessionForm.investment} disabled={settings.automaticReserves} onChange={(investment) => setSessionForm({ ...sessionForm, investment })} />
             </div>
             <section className="route-expenses"><h3>Outros gastos da rota</h3><p>Alimentação, estacionamento, pedágio ou outros gastos.</p>{sessionForm.expenses.map(expense => <div className="route-expense-row" key={expense.id}><Input aria-label="Descrição do gasto" placeholder="Ex.: alimentação" required maxLength={80} value={expense.description} onChange={e => setSessionForm({ ...sessionForm, expenses:sessionForm.expenses.map(x => x.id === expense.id ? {...x,description:e.target.value} : x) })} /><Input aria-label="Valor do gasto" type="number" inputMode="decimal" required min="0.01" step="0.01" placeholder="R$" value={expense.amount} onChange={e => setSessionForm({ ...sessionForm, expenses:sessionForm.expenses.map(x => x.id === expense.id ? {...x,amount:e.target.value} : x) })} /><Button type="button" variant="ghost" size="icon" aria-label="Remover gasto" onClick={() => setSessionForm({ ...sessionForm, expenses:sessionForm.expenses.filter(x => x.id !== expense.id) })}><Trash2 size={16} /></Button></div>)}<Button type="button" variant="outline" onClick={() => setSessionForm({ ...sessionForm, expenses:[...sessionForm.expenses,{id:crypto.randomUUID(),description:"",amount:""}] })}><Plus size={15} /> Adicionar gasto</Button></section>
-            <div className="live-result"><span>Disponível para contas nesta jornada</span><strong>{currency.format((Number(sessionForm.earnings || 0) - calculatedFuel - (settings.automaticReserves ? autoMaintenance : Number(sessionForm.maintenance || 0)) - (settings.automaticReserves ? autoInvestment : Number(sessionForm.investment || 0)) - sessionForm.expenses.reduce((sum,e)=>sum+Number(e.amount || 0),0)))}</strong></div>
+            <section className="allocation-choice"><h3>Destino do dinheiro desta rota</h3><label><input type="radio" name="allocation" checked={sessionForm.allocationMode==='all'} onChange={()=>setSessionForm({...sessionForm,allocationMode:'all'})}/><span><strong>Todo o líquido para as contas</strong><small>Depois de combustível, gastos e reservas, tudo fica para as contas.</small></span></label><label><input type="radio" name="allocation" checked={sessionForm.allocationMode==='target'} disabled={!draftContext.plan} onChange={()=>setSessionForm({...sessionForm,allocationMode:'target'})}/><span><strong>Só o previsto para as contas; sobra no cofrinho</strong><small>{draftContext.plan?`Limite do dia para contas: ${currency.format(draftContext.target/100)}. Várias rotas compartilham esse limite.`:'Crie ou ative um planejamento para usar esta opção.'}</small></span></label></section>
+            <div className="allocation-preview" aria-live="polite"><div><span>Para contas nesta rota</span><strong>{currency.format(draftAllocation.bills/100)}</strong></div><div><span>Para reservas nesta rota</span><strong>{currency.format(draftAllocation.reserve/100)}</strong></div><div><span>Para o cofrinho</span><strong>{currency.format(draftAllocation.piggy/100)}</strong></div><small>Reservas incluem manutenção, investimento e a reserva diária ainda não separada.</small></div>
             <DialogFooter><Button type="button" variant="ghost" onClick={() => setSessionOpen(false)}>Cancelar</Button><Button className="primary-action" type="submit" disabled={saving}>{saving ? "Salvando..." : <><Check size={17} /> Salvar jornada</>}</Button></DialogFooter>
           </form>
         </DialogContent>
@@ -1105,6 +1132,7 @@ export function RotasDashboard({ firstName }: { firstName: string | null }) {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(balanceEdit)} onOpenChange={open=>{if(!open)setBalanceEdit(null)}}><DialogContent className="app-dialog small-dialog"><form onSubmit={saveBalance}><DialogHeader><DialogTitle>Ajustar {balanceEdit?accountLabels[balanceEdit]:''}</DialogTitle><DialogDescription>Informe quanto restou nesta categoria após sua retirada ou correção. O ajuste fica no histórico.</DialogDescription></DialogHeader><MoneyInput required label="Saldo atual após o ajuste" value={balanceValue} onChange={setBalanceValue}/><Field label="Motivo (opcional)"><Input maxLength={120} placeholder="Ex.: retirada no banco" value={balanceReason} onChange={e=>setBalanceReason(e.target.value)}/></Field><DialogFooter><Button type="button" variant="ghost" onClick={()=>setBalanceEdit(null)}>Cancelar</Button><Button type="submit" className="primary-action" disabled={saving}>Salvar ajuste</Button></DialogFooter></form></DialogContent></Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="app-dialog small-dialog"><form onSubmit={saveSettings}><DialogHeader><DialogTitle>Configurações</DialogTitle><DialogDescription>Escolha como suas reservas serão informadas.</DialogDescription></DialogHeader><div className="settings-panel"><div className="setting-toggle"><div><strong>Reservas automáticas</strong><span>Desativado por padrão. No modo manual, você digita cada valor.</span></div><Switch checked={settingsForm.automaticReserves} onCheckedChange={(automaticReserves) => setSettingsForm({ ...settingsForm, automaticReserves })} aria-label="Ativar reservas automáticas" /></div>{settingsForm.automaticReserves && <div className="percentage-grid"><Field label="Manutenção (%)"><Input type="number" min="0" max="100" step="0.5" value={settingsForm.maintenancePercent} onChange={(event) => setSettingsForm({ ...settingsForm, maintenancePercent: Number(event.target.value) })} /></Field><Field label="Investimento (%)"><Input type="number" min="0" max="100" step="0.5" value={settingsForm.investmentPercent} onChange={(event) => setSettingsForm({ ...settingsForm, investmentPercent: Number(event.target.value) })} /></Field></div>}</div><DialogFooter><Button type="button" variant="ghost" onClick={() => setSettingsOpen(false)}>Cancelar</Button><Button className="primary-action" type="submit" disabled={saving}>Salvar preferências</Button></DialogFooter></form></DialogContent>
       </Dialog>

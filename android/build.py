@@ -40,7 +40,7 @@ if not keystore.exists():
  env=os.environ.copy();env['ROTAGO_SIGN_PASS']=password.read_text();r=subprocess.run(['keytool','-genkeypair','-keystore',str(keystore),'-storetype','PKCS12','-alias','rotago-release','-keyalg','RSA','-keysize','3072','-validity','10000','-dname','CN=RotaGo, O=RotaGo, C=BR','-storepass:env','ROTAGO_SIGN_PASS','-keypass:env','ROTAGO_SIGN_PASS'],env=env,capture_output=True)
  if r.returncode:raise RuntimeError('Failed to create signing identity')
  keystore.chmod(0o600)
-release=ROOT/'release';release.mkdir(exist_ok=True);apk=release/'RotaGo-1.0.0.apk'
+release=ROOT/'release';release.mkdir(exist_ok=True);apk=release/'RotaGo-1.1.0.apk'
 run([tool/'apksigner','sign','--ks',keystore,'--ks-key-alias','rotago-release','--ks-pass','file:'+str(password),'--out',apk,build/'aligned.apk'])
 run([tool/'apksigner','verify','--verbose',apk]);run([tool/'zipalign','-c','-P','16','4',apk])
 (release/'SHA256SUMS.txt').write_text(hashlib.sha256(apk.read_bytes()).hexdigest()+'  '+apk.name+'\n')
